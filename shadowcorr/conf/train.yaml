@@ -2,51 +2,71 @@ defaults:
   - defaults
   - _self_
 
-# Paths to preprocessed NPZ folders.  Override on CLI:
-#   shadowcorr-train data.train_dir=/path/to/train data.valid_dir=/path/to/valid
+# Paths to preprocessed voxel NPZ folders (required — must be absolute paths).
+# Override on CLI:
+#   shadowcorr-train data.train_dir=$(pwd)/data/voxel_npz_scene/train \
+#                    data.valid_dir=$(pwd)/data/voxel_npz_scene/valid
 data:
   train_dir: ???
   valid_dir: ???
 
 # ── Fixed training settings ────────────────────────────────────────────────
 training:
-  use_confidence: true      # include per-voxel confidence score feature
-  use_segment: true         # include 12-dim Word2Vec segment embeddings
-  save_best_loss: false     # also write a best-loss .pth alongside best-ARI
+  # Input feature channels
+  use_confidence: true   # include per-voxel confidence score as an input feature
+  use_segment: true      # include 12-dim Word2Vec segment-ID embeddings as input features
 
-  num_epochs: 24
-  instance_embed_dim: 32
-  num_heads1: 4
-  num_heads2: 8
-  seed: 68
+  # Training loop
+  num_epochs: 24         # total training epochs per hyperparameter combination
+  seed: 68               # random seed for weight initialisation and data shuffling
 
-  use_pretrained: false
-  pretrained_model_path: null
-  resume_from_checkpoint: false
-  resume_checkpoint_path: null
+  # Network architecture
+  instance_embed_dim: 32 # output embedding dimensionality of the sparse CNN
+  num_heads1: 4          # attention heads in the first local-attention layer
+  num_heads2: 8          # attention heads in the second local-attention layer
 
-# ── Hyperparameter grid (each value is a list; the search runs all combos) ─
-# Single-element lists = a fixed choice (no sweep for that param).
+  # Checkpointing
+  save_best_loss: false  # if true, also save a best-loss .pth alongside the best-ARI checkpoint
+
+  # Warm-start / resume options
+  use_pretrained: false              # initialise weights from a pretrained checkpoint
+  pretrained_model_path: null        # path to .pth to load when use_pretrained=true
+  resume_from_checkpoint: false      # continue a previous run from its last checkpoint
+  resume_checkpoint_path: null       # path to .pth to resume from
+
+# ── Hyperparameter grid ────────────────────────────────────────────────────
+# Each key takes a list of values. The sweep runs every combination.
+# Single-element lists fix that parameter (no sweep for it).
 grid:
-  learning_rate: [5.0e-5]
-  bandwidth: [0.7]
-  attn_k1: [16]
-  attn_k2: [32]
-  batch_size: [1]
-  delta_var: [0.9]
-  delta_dist: [1.0]
-  alpha: [0.8]
-  beta: [0.35]
-  gamma: [1.0e-4]
-  k_neighbors: [8]
-  temperature: [0.1]
-  run_ari_per_epoch: [true]
-  lr_scheduler: [none]       # none | cosine | step | exponential
-  lr_scheduler_gamma: [0.96] # used when lr_scheduler = exponential or step
+  learning_rate: [5.0e-5]      # Adam learning rate
+  bandwidth: [0.7]             # MeanShift bandwidth for clustering output embeddings
+  batch_size: [1]              # scenes per gradient step (typically 1 for variable-size voxel grids)
 
-  # Each entry is [prototypical_weight, discriminative_weight, graph_weight].
+  # Local-attention neighbourhood sizes (must be ≤ number of voxels in smallest scene)
+  attn_k1: [16]                # k-nearest neighbours for first attention layer
+  attn_k2: [32]                # k-nearest neighbours for second attention layer
+  k_neighbors: [8]             # k-NN used for graph-based loss construction
+
+  # Discriminative loss margins
+  delta_var: [0.9]             # pull margin — embeddings of the same instance pulled within this radius
+  delta_dist: [1.0]            # push margin — embeddings of different instances pushed beyond this radius
+
+  # Loss weights [prototypical, discriminative, graph]
   loss_weight_combinations:
     - [1.0, 1.0, 1.0]
+
+  # Per-term scaling within the combined loss
+  alpha: [0.8]                 # weight on the variance (pull) term inside discriminative loss
+  beta: [0.35]                 # weight on the distance (push) term inside discriminative loss
+  gamma: [1.0e-4]              # weight on the regularisation term inside discriminative loss
+
+  temperature: [0.1]           # contrastive temperature for the prototypical loss
+
+  # Learning-rate schedule
+  lr_scheduler: [none]         # none | cosine | step | exponential
+  lr_scheduler_gamma: [0.96]   # decay factor for step / exponential schedulers
+
+  run_ari_per_epoch: [true]    # compute ARI on the validation set after every epoch
 
 hydra:
   run:

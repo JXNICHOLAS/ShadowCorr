@@ -3,29 +3,28 @@
 generate_segment_npz.py
 Batch converter: multi-camera RGBD captures → stacked-segment NPZ files.
 
-Input layout (--input-dir, default: ./raw_sample):
+Input layout (--input-dir, default: ./sample):
   SetNNNN_Segment_C.png   — instance mask  (PNG, RGB-encoded class)
   SetNNNN_Depth_C.exr     — depth map      (EXR, float32, cm)
   where C = camera index 0–7
   (Color PNGs are present in the dataset but not used by this converter.)
-
-Output layout (--output-dir, default: ../data/in_segments):
-  <output-dir>/train/NNNN_stacked_segment.npz
-  <output-dir>/valid/NNNN_stacked_segment.npz
-  <output-dir>/test/ NNNN_stacked_segment.npz
-
-  All discovered sets are shuffled (--seed) then split into train/valid/test
-  at the ratios given by --split (default: 0.8 0.1 0.1).
 
 NPZ keys written (matches the format expected by shadowcorr preprocess):
   rock_pcd_list   (N_rocks,)      object   per-rock list of (N_pts, 3) float64 [cm]
   cameras         (N_cams, 4, 4)  float64  unique camera-to-world transforms    [cm]
   cam_idx_list    (N_rocks,)      object   per-rock list of int → cameras index
 
+Output layout (--output-dir, default: ../data/in_segments):
+  <output-dir>/NNNN_stacked_segment.npz
+
+  All sets are saved flat into the output directory. To split into
+  train/valid/test for preprocessing use the --split option of
+  shadowcorr-preprocess instead.
+
 Usage:
   python generate_segment_npz.py
-  python generate_segment_npz.py --input-dir /data/raw --split 0.7 0.15 0.15
-  python generate_segment_npz.py --input-dir /data/raw --overwrite --seed 0
+  python generate_segment_npz.py --input-dir /data/raw --output-dir /data/out
+  python generate_segment_npz.py --input-dir /data/raw --overwrite
   python generate_segment_npz.py --dry-run
 """
 
@@ -185,8 +184,8 @@ def transform_points(pts_cam: np.ndarray, T_cw: np.ndarray) -> np.ndarray:
     if len(pts_cam) == 0:
         return pts_cam
     ones  = np.ones((len(pts_cam), 1), dtype=np.float64)
-    homog = np.hstack([pts_cam, ones])          # (N, 4)
-    return (T_cw @ homog.T).T[:, :3]            # (N, 3)
+    homog = np.hstack([pts_cam, ones])
+    return (T_cw @ homog.T).T[:, :3]
 
 # Set discovery
 
@@ -227,7 +226,7 @@ def process_set(
 
     import open3d as o3d
 
-    rock_dict: dict[int, dict] = {}   # class_id → {'pcd': [], 'transform': []}
+    rock_dict: dict[int, dict] = {}
 
     for cam in cameras:
         c = cam['id']
@@ -368,13 +367,8 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument('--input-dir',  default=str(here / 'sample'),
                     help='Folder containing Set*_Segment/Depth files (default: ./sample)')
     ap.add_argument('--output-dir', default=str(here.parent / 'data' / 'in_segments'),
-                    help='Output root; NPZs go to <output-dir>/train|valid|test/ '
+                    help='Output directory; all NPZs are saved flat here '
                          '(default: ../data/in_segments)')
-    ap.add_argument('--split', nargs=3, type=float, default=[0.8, 0.1, 0.1],
-                    metavar=('TRAIN', 'VALID', 'TEST'),
-                    help='Train / valid / test split ratios, must sum to 1 (default: 0.8 0.1 0.1)')
-    ap.add_argument('--seed', type=int, default=42,
-                    help='Random seed used to shuffle sets before splitting (default: 42)')
     ap.add_argument('--cameras', nargs='+', type=int, default=[0, 2, 4, 6],
                     metavar='C', help='Camera indices to use (default: 0 2 4 6)')
     # Camera intrinsics — defaults for UE4 1920×1080, 90° hFOV
@@ -396,21 +390,13 @@ def parse_args() -> argparse.Namespace:
     return ap.parse_args()
 
 def main() -> None:
-    import random
-
     args = parse_args()
-
-    train_r, valid_r, test_r = args.split
-    if abs(train_r + valid_r + test_r - 1.0) > 1e-6:
-        print(f"[!] --split values must sum to 1.0 (got {train_r+valid_r+test_r:.4f})", file=sys.stderr)
-        sys.exit(1)
 
     print("=" * 60)
     print("ShadowCorr — Segment NPZ Generator")
     print("=" * 60)
     print(f"  Input   : {args.input_dir}")
-    print(f"  Output  : {args.output_dir}  (→ train/ valid/ test/)")
-    print(f"  Split   : train={train_r:.0%}  valid={valid_r:.0%}  test={test_r:.0%}  (seed={args.seed})")
+    print(f"  Output  : {args.output_dir}")
     print(f"  Cameras : {args.cameras}")
     print(f"  FX/FY   : {args.fx} / {args.fy}   CX/CY: {args.cx} / {args.cy}")
     print(f"  Max depth: {args.max_depth} cm   Voxel: {args.voxel_size} cm")
@@ -429,44 +415,21 @@ def main() -> None:
         sys.exit(1)
     print(f"\nFound {len(set_ids)} set(s): {set_ids[:5]}{'...' if len(set_ids) > 5 else ''}")
 
-    # Shuffle then partition into train / valid / test
-    shuffled = list(set_ids)
-    random.Random(args.seed).shuffle(shuffled)
-    n = len(shuffled)
-    n_train = round(n * train_r)
-    n_valid = round(n * valid_r)
-    # test gets the remainder to avoid rounding errors dropping a scene
-    n_test  = n - n_train - n_valid
-
-    split_map: dict[str, str] = {}
-    for sid in shuffled[:n_train]:
-        split_map[sid] = "train"
-    for sid in shuffled[n_train:n_train + n_valid]:
-        split_map[sid] = "valid"
-    for sid in shuffled[n_train + n_valid:]:
-        split_map[sid] = "test"
-
-    print(f"  → {n_train} train  |  {n_valid} valid  |  {n_test} test")
-
     if args.dry_run:
         print("\n[dry-run] No files written.")
         return
 
-    for split in ("train", "valid", "test"):
-        os.makedirs(os.path.join(args.output_dir, split), exist_ok=True)
+    os.makedirs(args.output_dir, exist_ok=True)
 
-    ok_counts   = {"train": 0, "valid": 0, "test": 0}
-    skip_counts = {"train": 0, "valid": 0, "test": 0}
-    failed = 0
+    ok_count = skip_count = failed = 0
 
     for idx, set_id in enumerate(set_ids):
-        split    = split_map[set_id]
-        out_path = os.path.join(args.output_dir, split, f"{set_id}_stacked_segment.npz")
-        print(f"\n[{idx+1}/{len(set_ids)}] Set {set_id}  [{split}]", end="")
+        out_path = os.path.join(args.output_dir, f"{set_id}_stacked_segment.npz")
+        print(f"\n[{idx+1}/{len(set_ids)}] Set {set_id}", end="")
 
         if os.path.exists(out_path) and not args.overwrite:
             print("  [SKIP] output exists")
-            skip_counts[split] += 1
+            skip_count += 1
             continue
 
         print()
@@ -484,21 +447,16 @@ def main() -> None:
                 failed += 1
                 continue
             save_to_npz(rock_data, out_path)
-            ok_counts[split] += 1
+            ok_count += 1
         except Exception as exc:
             import traceback
             print(f"  [!] ERROR: {exc}")
             traceback.print_exc()
             failed += 1
 
-    total_ok      = sum(ok_counts.values())
-    total_skipped = sum(skip_counts.values())
     print("\n" + "=" * 60)
-    print(f"Done — {total_ok} saved, {total_skipped} skipped, {failed} failed")
-    print(f"  train : {ok_counts['train']} saved  ({skip_counts['train']} skipped)")
-    print(f"  valid : {ok_counts['valid']} saved  ({skip_counts['valid']} skipped)")
-    print(f"  test  : {ok_counts['test']} saved  ({skip_counts['test']} skipped)")
-    print(f"Output root: {os.path.abspath(args.output_dir)}")
+    print(f"Done — {ok_count} saved, {skip_count} skipped, {failed} failed")
+    print(f"Output: {os.path.abspath(args.output_dir)}")
 
 if __name__ == "__main__":
     main()

@@ -244,7 +244,10 @@ def parse_args():
     p.add_argument("--embed-dim", type=int, default=12)
     p.add_argument("--embed-seed", type=int, default=42)
     p.add_argument("--score-threshold", type=float, default=50.0)
-    p.add_argument("--voxel-size", type=float, default=8.0)
+    p.add_argument("--voxel-size", type=float, default=8.0,
+                   help="Voxel edge length in mm — must match preprocessing (default: 8)")
+    p.add_argument("--expansion-rate", type=float, default=3.0,
+                   help="Ellipsoid expansion rate — must match preprocessing (default: 3.0)")
     return p.parse_args()
 
 
@@ -252,6 +255,10 @@ def main():
     args = parse_args()
     npz_path = Path(args.npz)
     model_path = Path(args.model_path)
+
+    # Align display scale with the voxel size used during preprocessing.
+    global VOXEL_SIZE
+    VOXEL_SIZE = args.voxel_size
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
@@ -268,6 +275,7 @@ def main():
         embed_seed=args.embed_seed,
         score_threshold_percentile=args.score_threshold,
         voxel_size=args.voxel_size,
+        expansion_rate=args.expansion_rate,
         device=device,
     )
 

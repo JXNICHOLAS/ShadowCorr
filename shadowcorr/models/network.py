@@ -55,18 +55,12 @@ class MultiHeadLocalAttention(nn.Module):
         k_feat = self.to_k(feats).view(N, H, D)
         v = self.to_v(feats).view(N, H, D)
 
-        knn_idx_expanded = knn_idx.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, H, D)
-        k_feat_expanded = k_feat.unsqueeze(0).expand(N, -1, -1, -1)
-        v_expanded = v.unsqueeze(0).expand(N, -1, -1, -1)
-        k_neighbors = torch.gather(k_feat_expanded, 1, knn_idx_expanded)
-        v_neighbors = torch.gather(v_expanded, 1, knn_idx_expanded)
+        k_neighbors = k_feat[knn_idx]
+        v_neighbors = v[knn_idx]
 
-        q = q.unsqueeze(1)
-        attn_scores = (q * k_neighbors).sum(-1) / (D ** 0.5)
-        attn_scores = attn_scores.permute(0, 2, 1)
-        attn_weights = F.softmax(attn_scores, dim=-1)
-        attn_weights = attn_weights.permute(0, 2, 1).unsqueeze(-1)
-        out = (attn_weights * v_neighbors).sum(1).reshape(N, C)
+        attn_scores = (q.unsqueeze(1) * k_neighbors).sum(-1) / (D ** 0.5)
+        attn_weights = F.softmax(attn_scores, dim=1)
+        out = (attn_weights.unsqueeze(-1) * v_neighbors).sum(1).reshape(N, C)
         return self.out_proj(out)
 
 

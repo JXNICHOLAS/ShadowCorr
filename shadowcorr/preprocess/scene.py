@@ -472,8 +472,10 @@ def batch_process(
     train_encoder_lr: float = 1e-3,
     train_encoder_temperature: float = 0.1,
     limit: Optional[int] = None,
+    npz_files: Optional[List[Path]] = None,
 ) -> None:
-    npz_files = sorted(input_dir.glob("*.npz"))
+    if npz_files is None:
+        npz_files = sorted(input_dir.glob("*.npz"))
     if not npz_files:
         print(f"No NPZ files found in {input_dir}")
         return

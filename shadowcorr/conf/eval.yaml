@@ -2,27 +2,26 @@ defaults:
   - defaults
   - _self_
 
-# Override on CLI, e.g.:
-#   shadowcorr eval input_dir=/path/to/npz model_path=/path/to/checkpoint.pth
+# Required paths — must be provided on the CLI (use absolute paths):
+#   shadowcorr-eval input_dir=$(pwd)/data/voxel_npz_scene/test \
+#                   model_path=$(pwd)/checkpoints/shadowcorr_best.pth
+input_dir: ???         # directory of voxel NPZs to evaluate, or a single NPZ file
+model_path: null       # path to a .pth checkpoint (required for inference)
+output_dir: eval_outputs  # directory where per-scene JSON results are written
 
-input_dir: ???
-model_path: null
-output_dir: eval_outputs
+# Clustering — MeanShift bandwidth applied to the network's output embeddings.
+bandwidth: 0.7         # larger values merge more embeddings into the same cluster
 
-bandwidth: 0.7
+# Voxel geometry — must match the values used during preprocessing.
+voxel_size: 8          # voxel edge length in mm
+expansion_rate: 3.0    # ellipsoid expansion factor for shadow depth estimation
 
-embed_dim: 12
-embed_seed: 42
-score_threshold_percentile: 50
-voxel_size: 8
-expansion_rate: 3.0
-train_encoder_steps: 200
+# Segment-ID embedding (re-run per scene at eval time, same as preprocess).
+embed_dim: 12          # must match the value used during preprocessing
+embed_seed: 42         # must match the value used during preprocessing
+score_threshold_percentile: 50  # voxels below this confidence percentile are dropped
+train_encoder_steps: 200        # gradient steps for the per-scene encoder
 train_encoder_lr: 0.001
 train_encoder_temperature: 0.1
-max_files: 0
 
-hydra:
-  run:
-    dir: outputs/eval/${now:%Y-%m-%d}/${now:%H-%M-%S}
-  job:
-    chdir: true
+max_files: 0           # limit evaluation to the first N files (0 = all)

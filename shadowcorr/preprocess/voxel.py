@@ -8,13 +8,6 @@ from scipy.spatial import ConvexHull
 from scipy.spatial import distance as scipy_distance
 from scipy.stats import beta as beta_dist
 
-# Voxel generation improvements:
-# - Direct computation approach: only processes voxels that contain points (vs. full grid generation)
-# - Inner cube filtering: uses Chebyshev distance with 80% core for better boundary detection
-# - Voxel grid creation: uses combined grofund truth + projected points for comprehensive coverage
-# - Voxel scoring: uses ground truth points only for accurate distance-based scoring
-# - Memory efficient: O(num_points) vs O(total_possible_voxels)
-
 # Global configuration
 VOXEL_SIZE = 8  # Size of voxels for visualization and intersection calculation (mm)
 INPUT_DOWNSAMPLE_SIZE = 2  # Voxel size for downsampling input point clouds (mm)

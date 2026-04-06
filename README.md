@@ -84,21 +84,63 @@ shadowcorr train training.num_epochs=50 grid.learning_rate=[1e-4,5e-5]
 
 Each run writes its log, resolved config, TensorBoard events, and checkpoints under `outputs/train/<date>/<time>/`. All training output goes to `shadowcorr.log` rather than the terminal.
 
+### Training settings
+
+All settings live in `shadowcorr/conf/train.yaml` and can be overridden on the CLI.
+
+**Input features** (`training.*`)
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `use_confidence` | `true` | Include per-voxel confidence score as a network input feature |
+| `use_segment` | `true` | Include 12-dim Word2Vec segment-ID embeddings as input features |
+
+**Network & training loop** (`training.*`)
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `num_epochs` | `24` | Training epochs per hyperparameter combination |
+| `instance_embed_dim` | `32` | Output embedding dimensionality of the sparse CNN |
+| `num_heads1` / `num_heads2` | `4` / `8` | Attention heads in each local-attention layer |
+| `seed` | `68` | Random seed for weight initialisation and data shuffling |
+| `save_best_loss` | `false` | Also save a best-loss checkpoint alongside the best-ARI one |
+
+**Hyperparameter grid** (`grid.*`) — each key takes a list; the sweep runs every combination
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `learning_rate` | `[5e-5]` | Adam learning rate |
+| `bandwidth` | `[0.7]` | MeanShift bandwidth for clustering output embeddings |
+| `batch_size` | `[1]` | Scenes per gradient step |
+| `attn_k1` / `attn_k2` | `[16]` / `[32]` | k-NN neighbourhood sizes for each attention layer |
+| `k_neighbors` | `[8]` | k-NN for graph-based loss construction |
+| `delta_var` / `delta_dist` | `[0.9]` / `[1.0]` | Pull / push margins in the discriminative loss |
+| `alpha` / `beta` / `gamma` | `[0.8]` / `[0.35]` / `[1e-4]` | Variance / distance / regularisation weights |
+| `temperature` | `[0.1]` | Contrastive temperature for the prototypical loss |
+| `loss_weight_combinations` | `[[1,1,1]]` | `[prototypical, discriminative, graph]` loss weights |
+| `lr_scheduler` | `[none]` | `none` \| `cosine` \| `step` \| `exponential` |
+
+Example — run a 2-combination sweep:
+
+```bash
+shadowcorr-train \
+    data.train_dir=$(pwd)/data/voxel_npz_scene/train \
+    data.valid_dir=$(pwd)/data/voxel_npz_scene/valid \
+    "grid.learning_rate=[1e-4,5e-5]" \
+    "grid.loss_weight_combinations=[[1,1,1],[1,0.5,0.5]]"
+```
+
 ## Data layout
 
 ```text
 data/
   in_segments/            # raw segment NPZs — input to preprocess
-    train_sample/         # 10 sample scenes (committed)
-    valid_sample/         # 4  sample scenes (committed)
-    test_sample/          # 5  sample scenes (committed)
-    train/                # full training split   (gitignored)
-    valid/                # full validation split (gitignored)
-    test/                 # full test split       (gitignored)
+    test_sample/          # 20 sample scenes (committed, for quick eval)
+    *.npz                 # your converted scenes — gitignored, add via generate_segment_npz.py
   voxel_npz_scene/        # voxel NPZs output by preprocess (gitignored, created at runtime)
 ```
 
-The `*_sample/` directories are committed for an immediate test run without downloading anything. For the full dataset see [Dataset](#dataset) below.
+`data/in_segments/test_sample/` (Sets 201–220, 20 scenes) is committed for an immediate eval run without downloading anything. For the full dataset see [Dataset](#dataset) below.
 
 Use absolute paths for `data.train_dir`, `data.valid_dir`, `input_dir`, and `model_path` — Hydra changes the working directory on each run.
 
@@ -150,24 +192,54 @@ Each scene: 8-camera RGBD captures of a synthetic lunar surface (Unreal Engine).
 
 ### Converting raw images to segment NPZs
 
-`dataset/generate_segment_npz.py` converts raw RGBD captures to the stacked-segment NPZ format and splits them directly into `data/in_segments/train/`, `valid/`, and `test/`. Three sample scenes (`Set2001`–`Set2003`) are in `dataset/sample/`.
+`dataset/generate_segment_npz.py` converts raw RGBD captures to the stacked-segment NPZ format and saves them flat into the output directory. Three sample scenes (`Set2001`–`Set2003`) are in `dataset/sample/`.
 
 ```bash
-# Run on the included sample scenes (default 80/10/10 split → data/in_segments/)
+# Run on the included sample scenes (→ data/in_segments/)
 python dataset/generate_segment_npz.py
 
-# Full dataset with a custom split
+# Full dataset with a custom output directory
 python dataset/generate_segment_npz.py \
     --input-dir /path/to/raw/sets \
-    --split 0.70 0.15 0.15
+    --output-dir /path/to/data/in_segments
 
-# Override output root, cameras, or seed
+# Override cameras or other options
 python dataset/generate_segment_npz.py \
     --input-dir /path/to/raw/sets \
-    --output-dir /custom/output \
-    --cameras 0 2 4 6 --seed 123
+    --cameras 0 2 4 6
 
 python dataset/generate_segment_npz.py --help
+```
+
+### Converting segment NPZs to voxel NPZs
+
+`shadowcorr-preprocess` ray-casts each segment into a shared voxel grid and writes one voxel NPZ per scene. Pass `data.split` to shuffle and partition the input NPZs into `train/`, `valid/`, and `test/` subdirectories automatically:
+
+```bash
+# With automatic train/valid/test split (80/10/10 default)
+shadowcorr-preprocess \
+    data.input_dir=$(pwd)/data/in_segments \
+    data.output_dir=$(pwd)/data/voxel_npz_scene \
+    "data.split=[0.8,0.1,0.1]"
+
+# Custom ratio
+shadowcorr-preprocess \
+    data.input_dir=$(pwd)/data/in_segments \
+    data.output_dir=$(pwd)/data/voxel_npz_scene \
+    "data.split=[0.7,0.15,0.15]" data.split_seed=0
+
+# No split — all scenes go to a single output directory
+shadowcorr-preprocess \
+    data.input_dir=$(pwd)/data/in_segments \
+    data.output_dir=$(pwd)/data/voxel_npz_scene
+```
+
+Then point `train` at the preprocessed split directories:
+
+```bash
+shadowcorr-train \
+    data.train_dir=$(pwd)/data/voxel_npz_scene/train \
+    data.valid_dir=$(pwd)/data/voxel_npz_scene/valid
 ```
 
 ## Visualization
@@ -192,7 +264,7 @@ python scripts/visualize.py \
     --save-dir vis_out/ --no-show
 ```
 
-Works with both raw segment NPZs (`rock_pcd_list`) and processed voxel NPZs (`voxel_positions`).
+`--voxel-size` (default `8`) and `--expansion-rate` (default `3.0`) must match the values used during preprocessing. Works with both raw segment NPZs (`rock_pcd_list`) and processed voxel NPZs (`voxel_positions`).
 
 ## Pretrained model
 

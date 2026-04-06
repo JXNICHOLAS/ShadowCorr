@@ -39,12 +39,12 @@ class SegmentIDEncoder(nn.Module):
                 voxel_embeddings.append(torch.zeros(self.embed_dim, device=dev))
             else:
                 seg_ids = torch.tensor(seg_list, dtype=torch.long, device=dev)
-                seg_embs = self.segment_embedding(seg_ids)  # (num_segs, embed_dim)
+                seg_embs = self.segment_embedding(seg_ids)
                 voxel_emb = seg_embs.mean(dim=0)
                 voxel_embeddings.append(voxel_emb)
 
         stacked = torch.stack(voxel_embeddings)
-        return F.normalize(stacked, p=2, dim=1)  # project onto unit sphere
+        return F.normalize(stacked, p=2, dim=1)
 
 
 def create_segment_encoder(max_segments: int, embed_dim: int = 12, **kwargs):

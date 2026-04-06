@@ -2,24 +2,35 @@ defaults:
   - defaults
   - _self_
 
+# Input / output paths.  Override on CLI (use absolute paths — Hydra changes cwd):
+#   shadowcorr-preprocess data.input_dir=$(pwd)/data/in_segments \
+#                         data.output_dir=$(pwd)/data/voxel_npz_scene
 data:
-  input_dir: data/in_segments
-  output_dir: data/voxel_npz_scene
+  input_dir: data/in_segments    # folder of raw segment NPZs from generate_segment_npz.py
+  output_dir: data/voxel_npz_scene  # destination for processed voxel NPZs
 
-# null = use bundled ``shadowcorr/preprocess/voxel.py``
+  # Optional train/valid/test split applied before preprocessing.
+  # Provide three ratios summing to 1; output goes to <output_dir>/train|valid|test/.
+  # Example: "data.split=[0.8,0.1,0.1]"  (null = no split, all files in output_dir)
+  split: null
+  split_seed: 42               # random seed used when shuffling before splitting
+
+# Path to the single-label voxel script. null = use the bundled preprocess/voxel.py.
 single_script: null
 
-embed_dim: 12
-embed_seed: 42
-score_threshold: 50
-overwrite: false
-train_encoder_steps: 200
-train_encoder_lr: 1e-3
-train_encoder_temperature: 0.1
-limit: null
+# Voxel geometry — must match the values used at eval time.
+voxel_size: 8          # voxel edge length in mm; controls spatial resolution of the grid
+expansion_rate: 3.0    # ellipsoid expansion factor for shadow depth estimation
 
-hydra:
-  run:
-    dir: outputs/preprocess/${now:%Y-%m-%d}/${now:%H-%M-%S}
-  job:
-    chdir: true
+# Segment-ID embedding (Word2Vec-style co-occurrence encoder, trained per scene).
+embed_dim: 12          # embedding vector dimensionality
+embed_seed: 42         # random seed for encoder weight initialisation
+train_encoder_steps: 200     # gradient steps to train the per-scene encoder (0 = random init)
+train_encoder_lr: 1e-3       # learning rate for the per-scene encoder
+train_encoder_temperature: 0.1  # InfoNCE temperature for co-occurrence contrastive loss
+
+# Confidence filtering — voxels below this score percentile are dropped.
+score_threshold: 50    # percentile threshold (0 = keep all, 50 = keep top half)
+
+overwrite: false       # re-process scenes whose output NPZ already exists
+limit: null            # process only the first N scenes (null = all); useful for debugging

@@ -1,7 +1,9 @@
-# Shared defaults for train / eval / preprocess (Hydra)
+# Shared logging defaults inherited by train / eval / preprocess.
+# Override any key on the CLI, e.g.:
+#   shadowcorr-train logging.level=DEBUG logging.tensorboard=false
 defaults: []
 
 logging:
-  tensorboard: true
-  log_filename: shadowcorr.log
-  level: INFO
+  tensorboard: true        # write TensorBoard event files to the run directory
+  log_filename: shadowcorr.log  # log file written inside the Hydra run directory
+  level: INFO              # Python logging level: DEBUG | INFO | WARNING | ERROR
