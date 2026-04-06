@@ -11,33 +11,30 @@ Yiyan Ruan · Erik Komendera · Virginia Tech
 
 ## Pipeline
 
+Eval and training are **independent paths** from the same raw segment NPZs:
+
 ```
-  Raw segments                Voxel NPZs             Trained model            Results
-                                   
-       │                           │                       │                     │
-       ▼                           ▼                       ▼                     ▼
-┌─────────────────┐     ┌─────────────────────┐   ┌───────────────────┐   ┌──────────────┐
-│   PREPROCESS    │────▶│       TRAIN         │──▶│      EVAL         │──▶│ ARI / Purity │
-│  (§ III  Data   │     │  (§ IV  Method)     │   │ (§ V  Experiments)│   │   Metrics    │
-│   Preparation)  │     │                     │   │                   │   │              │
-│                 │     │                     │   │                   │   │              │
-│ • Ray-cast each │     │ • RockInstanceNet   │   │ • Load .pth       │   │ • ARI        │
-│   segment into  │     │   Sparse (3D sparse │   │   checkpoint      │   │ • Rock purity│
-│   confidence-   │     │   CNN + local       │   │   directly        │   │ • Cluster    │
-│   weighted occ. │     │   attention)        │   │ • Forward pass on │   │   purity     │
-│   voxels        │     │ • Multi-objective   │   │   voxel NPZs      │   │              │
-│ • Word2Vec-style│     │   loss (discrim. +  │   │ • MeanShift       │   │              │
-│   segment-ID    │     │   prototypical +    │   │   clustering of   │   │              │
-│   embeddings    │     │   graph-based)      │   │   embeddings      │   │              │
-│   per voxel     │     │ • Hyperparameter    │   │ • Merge tiny      │   │              │
-│                 │     │   sweep             │   │   clusters        │   │              │
-└─────────────────┘     └─────────────────────┘   └───────────────────┘   └──────────────┘
-  preprocess_app.py          train_app.py               eval_app.py
-  preprocess/scene.py        pipeline/sweep.py          pipeline/evaluator.py
-  preprocess/voxel.py        pipeline/train_one.py      pipeline/metrics.py
-  models/encoder.py          models/network.py
-                             pipeline/losses.py
+  EVAL PATH — no offline preprocessing required
+  ──────────────────────────────────────────────────────────────────────────────────────
+  Raw segment NPZs ──────────────────────────────────────────► eval_app.py ──► Metrics
+  (rock_pcd_list)     voxelisation runs inside evaluator.py    (ARI, purity)
+
+  TRAIN PATH — offline preprocessing required before training
+  ──────────────────────────────────────────────────────────────────────────────────────
+  Raw segment NPZs ──► preprocess_app.py ──► Voxel NPZs ──► train_app.py ──► Checkpoint
+  (rock_pcd_list)      preprocess/scene.py   (voxel_        pipeline/         (.pth)
+                       preprocess/voxel.py    positions,     sweep.py
+                       models/encoder.py      labels, …)     pipeline/
+                                                             train_one.py
 ```
+
+What each step does:
+
+| Step | Description |
+|------|-------------|
+| **preprocess** | Ray-casts each segment into confidence-weighted occupancy voxels; computes Word2Vec-style segment-ID embeddings per voxel |
+| **train** | Trains RockInstanceNet (sparse 3D CNN + local attention) with discriminative, prototypical, and graph-based losses; runs a hyperparameter sweep |
+| **eval** | Loads a checkpoint, voxelises the input on-the-fly (or reads pre-voxelised files), runs a forward pass, clusters embeddings with MeanShift, reports ARI and purity |
 
 ## Requirements
 
@@ -66,27 +63,95 @@ pip install /tmp/torchsparse --no-build-isolation
 
 Conda users: create a Python 3.10 environment, then run the pip steps above.
 
-## Usage
+## Quick Evaluation
+
+`shadowcorr eval` runs batch inference over a directory (or a single file), computes ARI and purity metrics across all scenes, and writes a JSON results file. `data/in_segments/test_sample/` (Sets 201–220, 20 scenes) and `checkpoints/shadowcorr_best.pth` are both committed to the repo — no downloading or preprocessing needed:
 
 ```bash
-shadowcorr preprocess data.input_dir=/abs/path/to/in data.output_dir=/abs/path/to/out
-shadowcorr train      data.train_dir=/abs/train data.valid_dir=/abs/valid
-shadowcorr eval       input_dir=/abs/npz_or_dir model_path=/abs/checkpoint.pth
+# Evaluate on all 20 committed test scenes
+shadowcorr eval \
+    input_dir=$(pwd)/data/in_segments/test_sample \
+    model_path=$(pwd)/checkpoints/shadowcorr_best.pth
+
+# Evaluate a single scene
+shadowcorr eval \
+    input_dir=$(pwd)/data/in_segments/test_sample/218_stacked_segment.npz \
+    model_path=$(pwd)/checkpoints/shadowcorr_best.pth
 ```
 
-Or via Python module (`PYTHONPATH=. python -m shadowcorr.<preprocess|train|eval>_app ...`). Shell wrappers are in `scripts/`.
+`eval` accepts raw segment NPZs (`rock_pcd_list`) **and** pre-voxelised NPZs (`voxel_positions`) interchangeably — format is detected automatically. `in_channels` is inferred from the checkpoint.
 
-All configuration is in `shadowcorr/conf/` (Hydra). Any key can be overridden inline, e.g.:
+All configuration is in `shadowcorr/conf/eval.yaml`. Any key can be overridden inline, e.g. `bandwidth=0.5`. Each run writes its log and TensorBoard events under `outputs/eval/<date>/<time>/`.
+
+## Training Workflow
+
+Training requires three steps: raw images → segment NPZs → voxel NPZs → train.
+
+### Step 1 — Convert raw images to segment NPZs
+
+`dataset/generate_segment_npz.py` converts raw RGBD captures to the stacked-segment NPZ format. Three sample scenes (`Set2001`–`Set2003`) are in `dataset/sample/`.
 
 ```bash
-shadowcorr train training.num_epochs=50 grid.learning_rate=[1e-4,5e-5]
+# Run on the included sample scenes (→ data/in_segments/)
+python dataset/generate_segment_npz.py
+
+# Full dataset with a custom output directory
+python dataset/generate_segment_npz.py \
+    --input-dir /path/to/raw/sets \
+    --output-dir /path/to/data/in_segments
+
+# Override cameras or other options
+python dataset/generate_segment_npz.py \
+    --input-dir /path/to/raw/sets \
+    --cameras 0 2 4 6
+
+python dataset/generate_segment_npz.py --help
+```
+
+### Step 2 — Preprocess: segment NPZs → voxel NPZs
+
+`shadowcorr preprocess` ray-casts each segment into a shared voxel grid and writes one voxel NPZ per scene. Pass `data.split` to shuffle and partition into `train/`, `valid/`, and `test/` subdirectories automatically:
+
+```bash
+# With automatic train/valid/test split (80/10/10 default)
+shadowcorr preprocess \
+    data.input_dir=$(pwd)/data/in_segments \
+    data.output_dir=$(pwd)/data/voxel_npz_scene \
+    "data.split=[0.8,0.1,0.1]"
+
+# Custom ratio
+shadowcorr preprocess \
+    data.input_dir=$(pwd)/data/in_segments \
+    data.output_dir=$(pwd)/data/voxel_npz_scene \
+    "data.split=[0.7,0.15,0.15]" data.split_seed=0
+
+# No split — all scenes go to a single output directory
+shadowcorr preprocess \
+    data.input_dir=$(pwd)/data/in_segments \
+    data.output_dir=$(pwd)/data/voxel_npz_scene
+```
+
+### Step 3 — Train
+
+Point `train` at the preprocessed split directories:
+
+```bash
+shadowcorr train \
+    data.train_dir=$(pwd)/data/voxel_npz_scene/train \
+    data.valid_dir=$(pwd)/data/voxel_npz_scene/valid
+```
+
+All configuration is in `shadowcorr/conf/train.yaml`. Any key can be overridden inline:
+
+```bash
+shadowcorr train training.num_epochs=50 "grid.learning_rate=[1e-4,5e-5]"
 ```
 
 Each run writes its log, resolved config, TensorBoard events, and checkpoints under `outputs/train/<date>/<time>/`. All training output goes to `shadowcorr.log` rather than the terminal.
 
 ### Training settings
 
-All settings live in `shadowcorr/conf/train.yaml` and can be overridden on the CLI.
+All settings live in `shadowcorr/conf/train.yaml`.
 
 **Input features** (`training.*`)
 
@@ -123,30 +188,33 @@ All settings live in `shadowcorr/conf/train.yaml` and can be overridden on the C
 Example — run a 2-combination sweep:
 
 ```bash
-shadowcorr-train \
+shadowcorr train \
     data.train_dir=$(pwd)/data/voxel_npz_scene/train \
     data.valid_dir=$(pwd)/data/voxel_npz_scene/valid \
     "grid.learning_rate=[1e-4,5e-5]" \
     "grid.loss_weight_combinations=[[1,1,1],[1,0.5,0.5]]"
 ```
 
-## Data layout
+## Data
+
+### Data layout
 
 ```text
 data/
-  in_segments/            # raw segment NPZs — input to preprocess
-    test_sample/          # 20 sample scenes (committed, for quick eval)
+  in_segments/            # raw segment NPZs (input to preprocess; eval reads these directly)
+    test_sample/          # 20 sample scenes (committed, for quick eval — no download needed)
     *.npz                 # your converted scenes — gitignored, add via generate_segment_npz.py
   voxel_npz_scene/        # voxel NPZs output by preprocess (gitignored, created at runtime)
+    train/
+    valid/
+    test/
 ```
-
-`data/in_segments/test_sample/` (Sets 201–220, 20 scenes) is committed for an immediate eval run without downloading anything. For the full dataset see [Dataset](#dataset) below.
 
 Use absolute paths for `data.train_dir`, `data.valid_dir`, `input_dir`, and `model_path` — Hydra changes the working directory on each run.
 
 ### Raw segment NPZ format
 
-Each file corresponds to one multi-view scene:
+Each file corresponds to one multi-view scene. This is the format read directly by `eval` and by `preprocess`.
 
 | Key | Shape | dtype | Description |
 |---|---|---|---|
@@ -165,7 +233,7 @@ T_cw = d["cameras"][d["cam_idx_list"][0][0]] # (4, 4)     — matching camera ma
 
 ### Processed voxel NPZ format
 
-Output of `shadowcorr preprocess`, consumed by `train` and `eval`:
+Output of `shadowcorr preprocess`, consumed by `train` (required) and optionally by `eval`.
 
 | Key | Shape | dtype | Description |
 |---|---|---|---|
@@ -174,7 +242,7 @@ Output of `shadowcorr preprocess`, consumed by `train` and `eval`:
 | `voxel_confidences` | `(N_vox,)` | float32 | Beta-kernel confidence score ∈ (0, 1]. |
 | `voxel_segment_embeddings` | `(N_vox, 12)` | float32 | Word2Vec-style segment-ID embedding per voxel. |
 
-## Dataset
+### Dataset
 
 The **Unreal Engine Multi-View RGB-D Lunar Rock Dataset for 3D Segment Correspondence in Complex Scenes** (2,377 scenes, 57,048 images) is on Zenodo:
 
@@ -182,69 +250,17 @@ The **Unreal Engine Multi-View RGB-D Lunar Rock Dataset for 3D Segment Correspon
 
 Each scene: 8-camera RGBD captures of a synthetic lunar surface (Unreal Engine). See [`dataset/Dataset_README.md`](dataset/Dataset_README.md) for the class colour table, camera intrinsics, and coordinate conventions.
 
-### Train / validation / test split
-
 | Split      | Set range     | Scenes |
 |------------|---------------|--------|
 | Validation | Set 0001–0200 | 200    |
 | Test       | Set 0201–0400 | 200    |
 | Training   | Set 0401–2377 | 1,977  |
 
-### Converting raw images to segment NPZs
-
-`dataset/generate_segment_npz.py` converts raw RGBD captures to the stacked-segment NPZ format and saves them flat into the output directory. Three sample scenes (`Set2001`–`Set2003`) are in `dataset/sample/`.
-
-```bash
-# Run on the included sample scenes (→ data/in_segments/)
-python dataset/generate_segment_npz.py
-
-# Full dataset with a custom output directory
-python dataset/generate_segment_npz.py \
-    --input-dir /path/to/raw/sets \
-    --output-dir /path/to/data/in_segments
-
-# Override cameras or other options
-python dataset/generate_segment_npz.py \
-    --input-dir /path/to/raw/sets \
-    --cameras 0 2 4 6
-
-python dataset/generate_segment_npz.py --help
-```
-
-### Converting segment NPZs to voxel NPZs
-
-`shadowcorr-preprocess` ray-casts each segment into a shared voxel grid and writes one voxel NPZ per scene. Pass `data.split` to shuffle and partition the input NPZs into `train/`, `valid/`, and `test/` subdirectories automatically:
-
-```bash
-# With automatic train/valid/test split (80/10/10 default)
-shadowcorr-preprocess \
-    data.input_dir=$(pwd)/data/in_segments \
-    data.output_dir=$(pwd)/data/voxel_npz_scene \
-    "data.split=[0.8,0.1,0.1]"
-
-# Custom ratio
-shadowcorr-preprocess \
-    data.input_dir=$(pwd)/data/in_segments \
-    data.output_dir=$(pwd)/data/voxel_npz_scene \
-    "data.split=[0.7,0.15,0.15]" data.split_seed=0
-
-# No split — all scenes go to a single output directory
-shadowcorr-preprocess \
-    data.input_dir=$(pwd)/data/in_segments \
-    data.output_dir=$(pwd)/data/voxel_npz_scene
-```
-
-Then point `train` at the preprocessed split directories:
-
-```bash
-shadowcorr-train \
-    data.train_dir=$(pwd)/data/voxel_npz_scene/train \
-    data.valid_dir=$(pwd)/data/voxel_npz_scene/valid
-```
-
 ## Visualization
 
-`scripts/visualize.py` opens three simultaneous Open3D windows for one scene:
+`scripts/visualize.py` is a **single-scene inspection tool** — it runs inference on one NPZ and opens three simultaneous Open3D windows so you can visually audit the predictions. For batch metrics across many scenes use `shadowcorr eval` instead.
+
+The three windows:
 
 | Window | Description |
 |--------|-------------|
@@ -265,15 +281,6 @@ python scripts/visualize.py \
 ```
 
 `--voxel-size` (default `8`) and `--expansion-rate` (default `3.0`) must match the values used during preprocessing. Works with both raw segment NPZs (`rock_pcd_list`) and processed voxel NPZs (`voxel_positions`).
-
-## Pretrained model
-
-```bash
-shadowcorr eval input_dir=/abs/path/to/voxel_npz_dir \
-               model_path=/abs/path/to/checkpoints/shadowcorr_best.pth
-```
-
-`checkpoints/shadowcorr_best.pth` is committed to the repo. `in_channels` is inferred from the checkpoint automatically.
 
 ## Repository layout
 
@@ -310,7 +317,7 @@ ShadowCorr/
       io.py
       train_one.py        # single-combination training loop
       sweep.py            # hyperparameter sweep (shared data loader)
-      evaluator.py        # inference + metrics
+      evaluator.py        # inference + metrics (handles both NPZ formats)
     train_app.py          # Hydra entry → pipeline.sweep
     eval_app.py           # Hydra entry → pipeline.evaluator
     preprocess_app.py     # Hydra entry → preprocess.scene
@@ -328,6 +335,6 @@ ShadowCorr/
 ## Notes
 
 - **Ablations** — `training.use_confidence=false` or `training.use_segment=false` on the CLI; `in_channels` is recomputed automatically.
-- **Sweep vs Hydra multirun** — `shadowcorr-train --multirun grid.learning_rate=1e-4,5e-5` runs independent processes per combination. The custom `pipeline/sweep.py` loads the dataset once and streams all combinations through it, which is faster on a single GPU when I/O is the bottleneck.
+- **Sweep vs Hydra multirun** — `shadowcorr train --multirun grid.learning_rate=1e-4,5e-5` runs independent processes per combination. The custom `pipeline/sweep.py` loads the dataset once and streams all combinations through it, which is faster on a single GPU when I/O is the bottleneck.
 - **Best-loss checkpoint** — off by default. Enable with `training.save_best_loss=true`.
 - **Per-epoch TensorBoard** — currently logs summary scalars at run end (train) and per-scene metrics (eval). Per-epoch hooks are not yet wired.

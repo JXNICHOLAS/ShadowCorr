@@ -114,6 +114,7 @@ def save_single_result(
         'model_params': convert_to_json_serializable(params),
         'metrics': convert_to_json_serializable(metrics),
         'num_segments': len(segment_assignments),
+        'segment_assignments': convert_to_json_serializable(segment_assignments),
     }
     if processing_params:
         result['processing_params'] = convert_to_json_serializable(processing_params)
