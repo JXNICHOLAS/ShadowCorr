@@ -1,0 +1,25 @@
+defaults:
+  - defaults
+  - _self_
+
+data:
+  input_dir: data/in_segments
+  output_dir: data/voxel_npz_scene
+
+# null = use bundled ``shadowcorr/preprocess/voxel.py``
+single_script: null
+
+embed_dim: 12
+embed_seed: 42
+score_threshold: 50
+overwrite: false
+train_encoder_steps: 200
+train_encoder_lr: 1e-3
+train_encoder_temperature: 0.1
+limit: null
+
+hydra:
+  run:
+    dir: outputs/preprocess/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  job:
+    chdir: true

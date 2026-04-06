@@ -1,0 +1,47 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+type: software
+title: "ShadowCorr: Correspondence via Volumetric Consensus for Multi-View 3D Segments"
+authors:
+  - family-names: Ruan
+    given-names: Yiyan
+    email: yiyanr97@vt.edu
+    affiliation: "Virginia Polytechnic Institute and State University"
+  - family-names: Komendera
+    given-names: Erik
+    email: komendera@vt.edu
+    affiliation: "Virginia Polytechnic Institute and State University"
+year: 2026
+license: MIT
+repository-code: "https://github.com/JXNICHOLAS/ShadowCorr"
+keywords:
+  - voxel
+  - ray casting
+  - 3D clustering
+  - 3D correspondence
+  - 3D instance segmentation
+  - multi-view geometry
+  - sparse convolution
+abstract: >
+  ShadowCorr is a voxel-based framework that infers multi-view segment
+  correspondences through volumetric consensus rather than direct surface
+  matching. Each segment is projected behind its visible surface using an
+  estimated thickness, generating confidence-weighted occupancy voxels within
+  a shared 3D grid. A sparse 3D convolutional neural network learns cross-view
+  co-occurrence patterns, enabling clustering-based correspondence without
+  requiring surface overlap.
+
+preferred-citation:
+  type: article
+  title: "ShadowCorr: Correspondence via Volumetric Consensus for Multi-View 3D Segments"
+  authors:
+    - family-names: Ruan
+      given-names: Yiyan
+      email: yiyanr97@vt.edu
+      affiliation: "Virginia Polytechnic Institute and State University"
+    - family-names: Komendera
+      given-names: Erik
+      email: komendera@vt.edu
+      affiliation: "Virginia Polytechnic Institute and State University"
+  year: 2026
+  notes: "Under review"

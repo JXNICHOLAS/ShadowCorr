@@ -1,0 +1,7 @@
+# Shared defaults for train / eval / preprocess (Hydra)
+defaults: []
+
+logging:
+  tensorboard: true
+  log_filename: shadowcorr.log
+  level: INFO

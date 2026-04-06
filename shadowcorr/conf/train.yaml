@@ -1,0 +1,55 @@
+defaults:
+  - defaults
+  - _self_
+
+# Paths to preprocessed NPZ folders.  Override on CLI:
+#   shadowcorr-train data.train_dir=/path/to/train data.valid_dir=/path/to/valid
+data:
+  train_dir: ???
+  valid_dir: ???
+
+# ── Fixed training settings ────────────────────────────────────────────────
+training:
+  use_confidence: true      # include per-voxel confidence score feature
+  use_segment: true         # include 12-dim Word2Vec segment embeddings
+  save_best_loss: false     # also write a best-loss .pth alongside best-ARI
+
+  num_epochs: 24
+  instance_embed_dim: 32
+  num_heads1: 4
+  num_heads2: 8
+  seed: 68
+
+  use_pretrained: false
+  pretrained_model_path: null
+  resume_from_checkpoint: false
+  resume_checkpoint_path: null
+
+# ── Hyperparameter grid (each value is a list; the search runs all combos) ─
+# Single-element lists = a fixed choice (no sweep for that param).
+grid:
+  learning_rate: [5.0e-5]
+  bandwidth: [0.7]
+  attn_k1: [16]
+  attn_k2: [32]
+  batch_size: [1]
+  delta_var: [0.9]
+  delta_dist: [1.0]
+  alpha: [0.8]
+  beta: [0.35]
+  gamma: [1.0e-4]
+  k_neighbors: [8]
+  temperature: [0.1]
+  run_ari_per_epoch: [true]
+  lr_scheduler: [none]       # none | cosine | step | exponential
+  lr_scheduler_gamma: [0.96] # used when lr_scheduler = exponential or step
+
+  # Each entry is [prototypical_weight, discriminative_weight, graph_weight].
+  loss_weight_combinations:
+    - [1.0, 1.0, 1.0]
+
+hydra:
+  run:
+    dir: outputs/train/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  job:
+    chdir: true

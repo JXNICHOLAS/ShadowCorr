@@ -1,0 +1,22 @@
+# Core CLI + logging
+hydra-core>=1.3.2
+omegaconf>=2.3.0
+tensorboard>=2.14.0
+
+# Numeric / ML stack (versions depend on your CUDA / platform)
+numpy
+scipy
+scikit-learn
+tqdm
+pandas
+open3d
+
+# Dataset converter (dataset/generate_segment_npz.py)
+opencv-python-headless
+openexr
+
+# Sparse conv backend + PyTorch: install separately for your environment, e.g.:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu124
+#   pip install git+https://github.com/mit-han-lab/torchsparse.git
+# Optional faster k-NN in training:
+#   pip install torch-cluster

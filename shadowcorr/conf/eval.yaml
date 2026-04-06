@@ -1,0 +1,28 @@
+defaults:
+  - defaults
+  - _self_
+
+# Override on CLI, e.g.:
+#   shadowcorr eval input_dir=/path/to/npz model_path=/path/to/checkpoint.pth
+
+input_dir: ???
+model_path: null
+output_dir: eval_outputs
+
+bandwidth: 0.7
+
+embed_dim: 12
+embed_seed: 42
+score_threshold_percentile: 50
+voxel_size: 8
+expansion_rate: 3.0
+train_encoder_steps: 200
+train_encoder_lr: 0.001
+train_encoder_temperature: 0.1
+max_files: 0
+
+hydra:
+  run:
+    dir: outputs/eval/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  job:
+    chdir: true
